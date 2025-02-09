@@ -1,0 +1,55 @@
+# Step 1: Create the IAM Role (Terraform)
+aws iam create-role --role-name terraform --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "ec2.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}'
+
+
+# Step 2: Create and Attach the IAM Policy
+aws iam put-role-policy --role-name terraform --policy-name TerraformPolicy --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "ec2:*",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "ec2:InstanceType": "t2.nano"
+                }
+            }
+        },
+        {
+            "Effect": "Allow",
+            "Action": "ec2:*",
+            "Resource": [
+                "arn:aws:ec2:*:*:vpc/*",
+                "arn:aws:ec2:*:*:subnet/*",
+                "arn:aws:ec2:*:*:route-table/*",
+                "arn:aws:ec2:*:*:internet-gateway/*",
+                "arn:aws:ec2:*:*:nat-gateway/*",
+                "arn:aws:ec2:*:*:network-acl/*",
+                "arn:aws:ec2:*:*:security-group/*"
+            ]
+        }
+    ]
+}'
+
+
+# Step 3: Verify the Role and Policy
+# Check the Role:
+aws iam get-role --role-name terraform
+
+# Check the Policy Attached to the Role:
+aws iam get-role-policy --role-name terraform --policy-name TerraformPolicy
+
+
+
