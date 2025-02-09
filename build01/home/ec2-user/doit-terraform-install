@@ -1,5 +1,9 @@
 #!/usr/bin/bash
-  
+
+DTS=$(date +"%Y%m%d-%H%M%S")
+LOGFILE=$0.DTS.log
+exec > $LOGFILE 2>&1
+
 dnf update -y
 dnf install -y dnf-plugins-core
 dnf config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
