@@ -1,0 +1,28 @@
+aws iam put-role-policy --role-name terraform --policy-name TerraformPolicy --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "ec2:*",
+            "Resource": "*",
+            "Condition": {
+                "StringEquals": {
+                    "ec2:InstanceType": "t2.nano"
+                }
+            }
+        },
+        {
+            "Effect": "Allow",
+            "Action": "ec2:*",
+            "Resource": [
+                "arn:aws:ec2:*:*:vpc/*",
+                "arn:aws:ec2:*:*:subnet/*",
+                "arn:aws:ec2:*:*:route-table/*",
+                "arn:aws:ec2:*:*:internet-gateway/*",
+                "arn:aws:ec2:*:*:nat-gateway/*",
+                "arn:aws:ec2:*:*:network-acl/*",
+                "arn:aws:ec2:*:*:security-group/*"
+            ]
+        }
+    ]
+}'
