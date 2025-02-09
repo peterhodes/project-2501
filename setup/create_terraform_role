@@ -63,7 +63,7 @@ aws iam get-role-policy --role-name terraform --policy-name TerraformPolicy
 # Finally, here follows a mechanism to switch to the role, invoking a shell in which the credentials are invoked :
 # Store account ID and role name in variables
 # NOTE: If these variables are not already set, define them manually:
-ACCOUNTID="148761672355"
+export ACCOUNTID=$(aws sts get-caller-identity --query "Account" --output text)
 ROLE="terraform"
 SESSIONID="awssu-$$"
 
