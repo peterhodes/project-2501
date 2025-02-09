@@ -1,3 +1,10 @@
+
+These instructions need to be executed once only, and not each time the infrastructure (stack) is created.
+
+The purpose of the terraform role is to allow terraform - running on the build01 server - to work with resources.
+
+========================================================================================================================================
+
 # Step 1: Create the IAM Role (Terraform)
 aws iam create-role --role-name terraform --assume-role-policy-document '{
     "Version": "2012-10-17",
@@ -50,6 +57,35 @@ aws iam get-role --role-name terraform
 
 # Check the Policy Attached to the Role:
 aws iam get-role-policy --role-name terraform --policy-name TerraformPolicy
+
+
+
+# Finally, here follows a mechanism to switch to the role, invoking a shell in which the credentials are invoked :
+# Store account ID and role name in variables
+# NOTE: If these variables are not already set, define them manually:
+ACCOUNTID="148761672355"
+ROLE="terraform"
+SESSIONID="awssu-$$"
+
+# Assume the role and extract credentials
+eval $(aws sts assume-role \
+  --role-arn "arn:aws:iam::$ACCOUNTID:role/$ROLE" \
+  --role-session-name "$SESSIONID" \
+  --query "Credentials.[AccessKeyId,SecretAccessKey,SessionToken]" \
+  --output text | awk '{print "export AWS_ACCESS_KEY_ID="$1, "AWS_SECRET_ACCESS_KEY="$2, "AWS_SESSION_TOKEN="$3}')
+
+# Verify if the role was assumed successfully
+if [ -z "$AWS_ACCESS_KEY_ID" ]; then
+  echo "Failed to assume role. Exiting."
+  exit 1
+fi
+
+# Inform the user and spawn a new shell
+echo "Assumed role successfully! Spawning new shell..."
+PS1="[\u@aws-role-$ROLE \W]\$ " $SHELL
+
+
+
 
 
 
