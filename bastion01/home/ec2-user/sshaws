@@ -1,0 +1,20 @@
+#!/usr/bin/bash
+
+CONFIG_FILE="$HOME/.sshaws.lasthost"
+KEY_PATH="/home/ec2-user/ssh-key"
+USER="ec2-user"
+
+# If an argument is provided, use it as the new host and store it
+if [ "$#" -eq 1 ]; then
+    echo "$1" > "$CONFIG_FILE"
+    HOST="$1"
+elif [ -f "$CONFIG_FILE" ]; then
+    # If no argument is given, read the last used host
+    HOST=$(cat "$CONFIG_FILE")
+else
+    echo "Error: No host provided and no previous host found in $CONFIG_FILE"
+    exit 1
+fi
+
+# Connect to the host using SSH
+ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -l "$USER" "$HOST"
