@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: VPC with bastion host, build server, SSH access from Fuji02, and ICMP enabled
+Resources:
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyInternetGateway
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: eu-west-2a
+      Tags:
+        - Key: Name
+          Value: PublicSubnet
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: eu-west-2a
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  MyNatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: MyNatGateway
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: MyNatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNatGateway
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachInternetGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH from Fuji02 and ICMP within VPC
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 82.33.142.47/32
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: BastionSecurityGroup
+  InternalAccessSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and ICMP from bastion01
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecurityGroup
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 10.0.0.0/16
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: InternalAccessSecurityGroup
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - SSM-InstanceRole
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0c76bd4bd302b30ec
+      SubnetId: !Ref PublicSubnet
+      PrivateIpAddress: 10.0.0.10
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: bastion01
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          hostnamectl set-hostname bastion01
+          mkdir -p /home/ec2-user/.ssh
+          chmod 700 /home/ec2-user/.ssh
+          echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC0e3/SJ2Ylwhke7R9Z3dw0SDP8gHYoXwDmqvk1vIbuV Fuji02BastionKey" > /home/ec2-user/.ssh/authorized_keys
+          chmod 600 /home/ec2-user/.ssh/authorized_keys
+          cat <<EOF > /home/ec2-user/ssh-key
+          -----BEGIN OPENSSH PRIVATE KEY-----
+          REDACTED
+          -----END OPENSSH PRIVATE KEY-----
+          EOF
+          chmod 600 /home/ec2-user/ssh-key
+          chown ec2-user:ec2-user /home/ec2-user/ssh-key
+          chown -R ec2-user:ec2-user /home/ec2-user/.ssh
+  BuildInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0c76bd4bd302b30ec
+      SubnetId: !Ref PrivateSubnet
+      PrivateIpAddress: 10.0.1.10
+      SecurityGroupIds:
+        - !Ref InternalAccessSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: build01
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          hostnamectl set-hostname build01
+          mkdir -p /home/ec2-user/.ssh
+          chmod 700 /home/ec2-user/.ssh
+          echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC0e3/SJ2Ylwhke7R9Z3dw0SDP8gHYoXwDmqvk1vIbuV Fuji02BastionKey" > /home/ec2-user/.ssh/authorized_keys
+          chmod 600 /home/ec2-user/.ssh/authorized_keys
+                    cat <<EOF > /home/ec2-user/ssh-key
+          -----BEGIN OPENSSH PRIVATE KEY-----
+          REDACTED
+          -----END OPENSSH PRIVATE KEY-----
+          EOF
+          chmod 600 /home/ec2-user/ssh-key
+          chown ec2-user:ec2-user /home/ec2-user/ssh-key
+          chown -R ec2-user:ec2-user /home/ec2-user/.ssh
+Outputs:
+  BastionPrivateIP:
+    Description: Private IP of bastion01
+    Value: 10.0.0.10
+  BuildPrivateIP:
+    Description: Private IP of build01
+    Value: 10.0.1.10
