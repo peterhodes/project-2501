@@ -1,0 +1,143 @@
+#!/bin/bash
+
+# Fetch the ARN of the current AWS identity
+ARN=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null)
+
+# Check if AWS CLI returned an ARN
+if [[ -z "$ARN" ]]; then
+    echo "❌ Error: Failed to retrieve AWS IAM identity. Ensure AWS CLI is configured correctly."
+    exit 1
+fi
+
+# Get AWS Account ID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Try to fetch AWS Account Name (if AWS Organizations is enabled)
+AWS_ACCOUNT_NAME=$(aws organizations describe-account --account-id "$AWS_ACCOUNT_ID" --query "Account.Name" --output text 2>/dev/null)
+
+# Determine if it's an IAM Role or IAM User
+if [[ "$ARN" == *":role/"* ]]; then
+    IAM_TYPE="Role"
+    IAM_NAME="${ARN##*/}"
+elif [[ "$ARN" == *":user/"* ]]; then
+    IAM_TYPE="User"
+    IAM_NAME="${ARN##*/}"
+else
+    echo "❌ Error: Unable to determine IAM identity type. Unexpected ARN format: $ARN"
+    exit 1
+fi
+
+# Output the IAM identity and AWS account details
+echo "========================================="
+echo "🌍 AWS Account ID: $AWS_ACCOUNT_ID"
+if [[ -n "$AWS_ACCOUNT_NAME" ]]; then
+    echo "🏢 AWS Account Name: $AWS_ACCOUNT_NAME"
+fi
+echo "🛡️ IAM $IAM_TYPE: $IAM_NAME"
+echo "========================================="
+
+# Fetch policies attached to the IAM User or Role
+if [[ "$IAM_TYPE" == "User" ]]; then
+    echo "🔍 Fetching policies for IAM User: $IAM_NAME..."
+
+    # Get directly attached policies
+    ATTACHED_POLICIES=$(aws iam list-attached-user-policies --user-name "$IAM_NAME" --query "AttachedPolicies[].PolicyArn" --output text)
+
+    # Get inline policies
+    INLINE_POLICIES=$(aws iam list-user-policies --user-name "$IAM_NAME" --query "PolicyNames" --output text)
+
+    # Check if the user has MFA enabled
+    MFA_ENABLED=$(aws iam list-mfa-devices --user-name "$IAM_NAME" --query "MFADevices" --output text)
+    if [[ -z "$MFA_ENABLED" ]]; then
+        echo "⚠️ Warning: MFA is NOT enabled for user $IAM_NAME!"
+    else
+        echo "✅ MFA is enabled for user $IAM_NAME."
+    fi
+
+    # Check if the user has AWS Console access
+    LOGIN_PROFILE=$(aws iam get-login-profile --user-name "$IAM_NAME" 2>/dev/null)
+    if [[ -z "$LOGIN_PROFILE" ]]; then
+        echo "🔹 User $IAM_NAME does NOT have AWS Console Access (CLI/API only)."
+    else
+        echo "✅ User $IAM_NAME has AWS Console Access."
+    fi
+
+    # List IAM Groups the user belongs to
+    GROUPS=$(aws iam list-groups-for-user --user-name "$IAM_NAME" --query "Groups[].GroupName" --output text)
+    if [[ -z "$GROUPS" ]]; then
+        echo "ℹ️ User $IAM_NAME is not part of any IAM groups."
+    else
+        echo "🛂 IAM User $IAM_NAME belongs to groups:"
+        echo "$GROUPS" | tr ' ' '\n'
+    fi
+
+elif [[ "$IAM_TYPE" == "Role" ]]; then
+    echo "🔍 Fetching policies for IAM Role: $IAM_NAME..."
+
+    # Get directly attached policies
+    ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name "$IAM_NAME" --query "AttachedPolicies[].PolicyArn" --output text)
+
+    # Get inline policies
+    INLINE_POLICIES=$(aws iam list-role-policies --role-name "$IAM_NAME" --query "PolicyNames" --output text)
+
+    # Identify if the role is an AWS service role
+    SERVICE_ROLE=$(aws iam get-role --role-name "$IAM_NAME" --query "Role.AssumeRolePolicyDocument.Statement[].Principal.Service" --output text)
+    if [[ -n "$SERVICE_ROLE" ]]; then
+        echo "ℹ️ This role is an AWS Service Role used by: $SERVICE_ROLE"
+    fi
+
+    # List trust relationships (who can assume the role)
+    TRUST_POLICY=$(aws iam get-role --role-name "$IAM_NAME" --query "Role.AssumeRolePolicyDocument.Statement[].Principal" --output json)
+    echo "🔍 Trust Relationships for Role $IAM_NAME:"
+    echo "$TRUST_POLICY"
+fi
+
+# Display attached policies with fixed formatting
+echo "========================================="
+echo "📜 Attached Policies:"
+if [[ -z "$ATTACHED_POLICIES" ]]; then
+    echo "  ❌ None"
+else
+    echo "$ATTACHED_POLICIES" | tr ' ' '\n'
+fi
+
+# Display inline policies with fixed formatting
+echo "📜 Inline Policies:"
+if [[ -z "$INLINE_POLICIES" ]]; then
+    echo "  ❌ None"
+else
+    echo "$INLINE_POLICIES" | tr ' ' '\n'
+fi
+
+# Get permissions for attached managed policies
+if [[ -n "$ATTACHED_POLICIES" ]]; then
+    echo "========================================="
+    echo "✅ Allowed Actions from Managed Policies:"
+
+    for POLICY_ARN in $ATTACHED_POLICIES; do
+        POLICY_VERSION=$(aws iam get-policy --policy-arn "$POLICY_ARN" --query "Policy.DefaultVersionId" --output text)
+        ALLOWED_ACTIONS=$(aws iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$POLICY_VERSION" --query "PolicyVersion.Document.Statement[].Action" --output json)
+
+        echo "🔹 Policy: $POLICY_ARN"
+        echo "$ALLOWED_ACTIONS"
+        echo "-----------------------------------------"
+    done
+fi
+
+# Check for Denied Actions in policies
+echo "========================================="
+echo "❌ Denied Actions from Managed Policies:"
+
+for POLICY_ARN in $ATTACHED_POLICIES; do
+    POLICY_VERSION=$(aws iam get-policy --policy-arn "$POLICY_ARN" --query "Policy.DefaultVersionId" --output text)
+    DENIED_ACTIONS=$(aws iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$POLICY_VERSION" --query "PolicyVersion.Document.Statement[?Effect=='Deny'].Action" --output json)
+
+    if [[ -n "$DENIED_ACTIONS" && "$DENIED_ACTIONS" != "[]" ]]; then
+        echo "❌ Policy: $POLICY_ARN"
+        echo "$DENIED_ACTIONS"
+        echo "-----------------------------------------"
+    fi
+done
+
+echo "✅ Policy retrieval completed!"
+echo "========================================="
