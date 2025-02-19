@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+
+dnf update -y
+dnf install -y curl wget unzip
+
+curl -L -o chef-server-core.rpm https://packages.chef.io/files/stable/chef-server/15.9.27/el/9/chef-server-core-15.9.27-1.el9.x86_64.rpm
+dnf install -y ./chef-server-core.rpm
+
+chef-server-ctl reconfigure
+
+
