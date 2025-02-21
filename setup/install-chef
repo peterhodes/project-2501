@@ -1,5 +1,6 @@
 #!/usr/bin/bash
 
+# CHEF SERVER
 dnf update -y
 dnf install -y curl wget unzip
 
@@ -7,5 +8,21 @@ curl -L -o chef-server-core.rpm https://packages.chef.io/files/stable/chef-serve
 dnf install -y ./chef-server-core.rpm
 
 chef-server-ctl reconfigure
+
+# CHEF CLIENT
+curl -L https://omnitruck.chef.io/install.sh | sudo bash
+
+tee /etc/chef/client.rb <<EOF
+log_level        :info
+log_location     STDOUT
+chef_server_url  "https://$(hostname -f)/organizations/myorg"
+validation_client_name "myorg-validator"
+node_name        "$(hostname -f)"
+EOF
+
+chef-server-ctl user-create admin "Admin" "User" admin@fake.local "password" --filename ~/admin.pem
+chef-server-ctl org-create myorg "My Organization" --association_user admin --filename ~/myorg-validator.pem
+
+
 
 
